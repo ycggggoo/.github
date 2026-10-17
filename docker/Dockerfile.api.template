@@ -1,0 +1,52 @@
+# ============================================================
+# 标准 Java/Maven API Dockerfile 模板
+#
+# 使用方式:
+#   docker build -f deploy/Dockerfile.api
+#     --build-arg JAR_PATH=xingyun-api/target/xingyun-api.jar
+#     -t myapp-api:latest .
+#
+# 特性:
+#   - 多阶段构建 (maven build → jre runtime)
+#   - Maven 依赖缓存层
+#   - Flyway 迁移文件自动打入镜像
+#   - 健康检查内置 curl
+# ============================================================
+
+# ── Stage 1: Maven 构建 ─────────────────────────────
+FROM maven:3.9-eclipse-temurin-21 AS build
+WORKDIR /workspace
+
+# 先拷 pom 利用 Docker 层缓存
+COPY pom.xml .
+# ★ 按项目实际模块调整下面几行 ★
+COPY xingyun-api/pom.xml xingyun-api/
+COPY xingyun-core/pom.xml xingyun-core/
+# ... 其他模块 pom
+
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -q -B dependency:go-offline -DskipTests || true
+
+COPY . .
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -q -B -pl xingyun-api -am package -DskipTests
+
+# ── Stage 2: 运行镜像 ────────────────────────────────
+FROM eclipse-temurin:21-jre-jammy
+WORKDIR /opt
+
+# curl 用于健康检查
+RUN apt-get update -qq && apt-get install -qq -y curl && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /workspace/xingyun-api/target/*.jar /opt/app.jar
+
+EXPOSE 8080
+
+ENV SPRING_PROFILES_ACTIVE="prod" \
+    JAVA_OPTS="-Xms512m -Xmx2g"
+
+# 健康检查: Spring Boot Actuator
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD curl -sf http://localhost:8080/actuator/health || exit 1
+
+CMD ["sh", "-c", "exec java -server -Dspring.profiles.active=${SPRING_PROFILES_ACTIVE} ${JAVA_OPTS} -jar /opt/app.jar"]

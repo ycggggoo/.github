@@ -1,0 +1,74 @@
+# 可复用: SSH 部署到服务器 + 健康检查 + 失败回滚
+
+name: SSH Deploy
+
+on:
+  workflow_call:
+    inputs:
+      image-name:
+        required: true
+        type: string
+        description: 'ghcr.io 完整镜像名'
+      container-name:
+        required: true
+        type: string
+        description: 'docker-compose 中的容器名'
+      health-url:
+        required: false
+        type: string
+        default: 'http://localhost:8080/actuator/health'
+      compose-file:
+        required: false
+        type: string
+        default: 'docker-compose.app.yml'
+      deploy-dir:
+        required: false
+        type: string
+        default: '/opt/app'
+    secrets:
+      SSH_HOST:
+        required: true
+      SSH_KEY:
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: root
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            set -e
+            IMAGE=${{ inputs.image-name }}
+            TAG=${{ github.sha }}
+            CONTAINER=${{ inputs.container-name }}
+            DIR=${{ inputs.deploy-dir }}
+            HEALTH_URL="${{ inputs.health-url }}"
+
+            echo "=== Pull image: ${IMAGE}:${TAG} ==="
+            docker pull ${IMAGE}:${TAG}
+
+            echo "=== Tag as :local ==="
+            docker tag ${IMAGE}:${TAG} ${IMAGE}:local
+
+            echo "=== Redeploy ==="
+            cd ${DIR}
+            docker compose -f ${{ inputs.compose-file }} up -d --force-recreate ${CONTAINER}
+
+            echo "=== Health check ==="
+            for i in 1 2 3 4 5 6 7 8; do
+              if docker exec ${CONTAINER} curl -sf -m 5 ${HEALTH_URL}; then
+                echo "OK"
+                exit 0
+              fi
+              echo "Waiting... ($i/8)"
+              sleep 15
+            done
+
+            echo "!!! FAILED - Rolling back !!!"
+            docker tag ${IMAGE}:latest ${IMAGE}:local
+            docker compose -f ${{ inputs.compose-file }} up -d --force-recreate ${CONTAINER}
+            exit 1
