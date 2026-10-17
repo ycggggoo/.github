@@ -1,0 +1,77 @@
+# 可复用: Docker 构建 & 推送 GHCR
+# 用于 push to master 后构建镜像
+
+name: Docker Build & Push
+
+on:
+  workflow_call:
+    inputs:
+      image-name:
+        required: true
+        type: string
+        description: '镜像名 (不含 registry), 如 ycggggoo/xingyun-api'
+      dockerfile:
+        required: false
+        type: string
+        default: 'deploy/Dockerfile'
+      context:
+        required: false
+        type: string
+        default: '.'
+      java-version:
+        required: false
+        type: string
+        default: '21'
+      maven-module:
+        required: false
+        type: string
+        default: ''
+    secrets:
+      GHCR_PAT:
+        required: true
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ inputs.java-version }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ inputs.java-version }}
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Maven package
+        run: |
+          if [ -n "${{ inputs.maven-module }}" ]; then
+            mvn -B -pl ${{ inputs.maven-module }} -am package -DskipTests -q
+          else
+            mvn -B package -DskipTests -q
+          fi
+
+      - name: Set short SHA
+        run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -f ${{ inputs.dockerfile }} \
+            --build-arg GIT_COMMIT=${{ github.sha }} \
+            -t ghcr.io/${{ inputs.image-name }}:${{ github.sha }} \
+            -t ghcr.io/${{ inputs.image-name }}:${{ env.SHORT_SHA }} \
+            -t ghcr.io/${{ inputs.image-name }}:latest \
+            ${{ inputs.context }}
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Push all tags
+        run: |
+          docker push ghcr.io/${{ inputs.image-name }}:${{ github.sha }}
+          docker push ghcr.io/${{ inputs.image-name }}:${{ env.SHORT_SHA }}
+          docker push ghcr.io/${{ inputs.image-name }}:latest

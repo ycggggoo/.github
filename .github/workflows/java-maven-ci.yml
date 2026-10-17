@@ -1,0 +1,73 @@
+# 可复用: Java Maven 后端 CI（编译 + 测试）
+# 使用方式: 在目标项目 .github/workflows/ 下创建同名文件，或通过 workflow_call 引用
+
+name: Java Backend CI
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        required: false
+        type: string
+        default: '21'
+      maven-module:
+        description: '要打包的 Maven 子模块 (如 xingyun-api)'
+        required: false
+        type: string
+        default: ''
+      run-tests:
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      GHCR_PAT:
+        required: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ inputs.java-version }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ inputs.java-version }}
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Compile
+        run: |
+          if [ -n "${{ inputs.maven-module }}" ]; then
+            mvn -B -pl ${{ inputs.maven-module }} -am compile -q
+          else
+            mvn -B compile -q
+          fi
+
+      - name: Test
+        if: ${{ inputs.run-tests }}
+        run: |
+          if [ -n "${{ inputs.maven-module }}" ]; then
+            mvn -B -pl ${{ inputs.maven-module }} -am test
+          else
+            mvn -B test
+          fi
+
+      - name: Package
+        run: |
+          if [ -n "${{ inputs.maven-module }}" ]; then
+            mvn -B -pl ${{ inputs.maven-module }} -am package -DskipTests -q
+          else
+            mvn -B package -DskipTests -q
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jar-package
+          path: |
+            **/target/*.jar
+            !**/target/*-sources.jar
+            !**/target/*-javadoc.jar
+          retention-days: 1
+", "path": "/home/chaoye4/code/ycgg/ci-templates/workflows/java-maven-ci.yml"}
