@@ -1,19 +1,14 @@
-# 前端 Node CI (pnpm build + Docker)
-# 适用于 Vue/React 前端项目
+# 前端 CI: Docker 构建 & 推送 GHCR
+# Dockerfile.web 内部完成 pnpm install + build
 
-name: Frontend Node CI
+name: Frontend Docker CI
 
 on:
   workflow_call:
     inputs:
-      node-version:
-        required: false
-        type: string
-        default: '20'
       image-name:
         required: true
         type: string
-        description: 'ghcr.io 镜像名'
       dockerfile:
         required: false
         type: string
@@ -34,19 +29,6 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ inputs.node-version }}
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - run: pnpm build:docker
 
       - run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
